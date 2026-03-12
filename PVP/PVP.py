@@ -1,63 +1,42 @@
 import numpy as np
-import math
 import os
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+from numba import njit
 
 # =======================
 # 配置
 # =======================
 
-SCENE_ID = 0
+GRID_SIZE = 8
 
-GEO_PATH  = rf"D:\Desktop\RM\feature_store\numerical_data\geo\{SCENE_ID}.npy"
-WALL_PATH = rf"D:\Desktop\RM\data\wall_segment\{SCENE_ID}.npy"
-PVW_PATH  = rf"D:\Desktop\RM\data\PVW\{SCENE_ID}.npy"
-
-PVP_DIR   = r"D:\Desktop\RM\data\PVP"
-PVP_PATH  = rf"{PVP_DIR}\{SCENE_ID}.npy"
-
-GRID_SIZE = 8        # 用于 wall_grid（不是图像大小）
-EPS = 1e-9
+GEO_ROOT  = "/root/geo"
+WALL_ROOT = "/root/wall_segment_DRM"
+PVW_ROOT  = "/root/RM/data/PVW"
+PVP_ROOT  = "/root/RM/data/PVP"
 
 # =======================
-# 几何基础
+# 几何
 # =======================
 
-def orient(a, b, c):
-    return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+@njit
+def orient_nb(ax, ay, bx, by, cx, cy):
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
 
-def on_segment(a, b, p):
-    return (
-        min(a[0], b[0]) - EPS <= p[0] <= max(a[0], b[0]) + EPS and
-        min(a[1], b[1]) - EPS <= p[1] <= max(a[1], b[1]) + EPS
-    )
-
-def segment_intersect_strict(a, b, c, d):
-    """
-    严格相交：
-    - 端点接触 / 共线接触 → False
-    - 真正穿过内部 → True
-    """
-    o1 = orient(a, b, c)
-    o2 = orient(a, b, d)
-    o3 = orient(c, d, a)
-    o4 = orient(c, d, b)
-
-    if o1 * o2 < 0 and o3 * o4 < 0:
-        return True
-
-    return False
+@njit
+def segment_intersect_strict_nb(ax, ay, bx, by, cx, cy, dx, dy):
+    o1 = orient_nb(ax, ay, bx, by, cx, cy)
+    o2 = orient_nb(ax, ay, bx, by, dx, dy)
+    o3 = orient_nb(cx, cy, dx, dy, ax, ay)
+    o4 = orient_nb(cx, cy, dx, dy, bx, by)
+    return (o1 * o2 < 0.0 and o3 * o4 < 0.0)
 
 # =======================
-# wall_grid 构建
+# wall_grid
 # =======================
 
 def build_wall_grid(walls):
-    """
-    把每个墙段放进空间网格，加速可见性判定
-    """
     grid = {}
-
     for idx, (A, B) in enumerate(walls):
         x0, y0 = A
         x1, y1 = B
@@ -74,14 +53,10 @@ def build_wall_grid(walls):
     return grid
 
 # =======================
-# fast visible
+# visible
 # =======================
 
 def visible_fast(p1, p2, walls, wall_grid):
-    """
-    判断 p1 -> p2 是否被任何墙严格遮挡
-    端点接触 ≠ 遮挡
-    """
     x0, y0 = p1
     x1, y1 = p2
 
@@ -100,13 +75,19 @@ def visible_fast(p1, p2, walls, wall_grid):
                 checked.add(idx)
 
                 A, B = walls[idx]
-                if segment_intersect_strict(p1, p2, A, B):
+
+                if segment_intersect_strict_nb(
+                    x0, y0,
+                    x1, y1,
+                    A[0], A[1],
+                    B[0], B[1]
+                ):
                     return False
 
     return True
 
 # =======================
-# PVP 构建
+# build PVP
 # =======================
 
 def build_PVP(geo, walls, PVW, wall_grid):
@@ -116,7 +97,7 @@ def build_PVP(geo, walls, PVW, wall_grid):
 
     free_points = np.argwhere(geo == 0)
 
-    for y, x in tqdm(free_points, desc=f"Build PVP scene {SCENE_ID}"):
+    for y, x in free_points:
         vis_walls = PVW[y, x]
         if not vis_walls:
             PVP[y, x] = []
@@ -147,30 +128,57 @@ def build_PVP(geo, walls, PVW, wall_grid):
     return PVP
 
 # =======================
-# main
+# 单场景
 # =======================
 
-def main():
-    print("[Load] geo / walls / PVW")
+def run_scene(scene_id):
 
-    geo   = np.load(GEO_PATH)
-    walls = np.load(WALL_PATH, allow_pickle=True).tolist()
-    PVW   = np.load(PVW_PATH, allow_pickle=True)
+    try:
+        print(f"[Start] Scene {scene_id}", flush=True)
 
-    print("[Build] wall_grid")
-    wall_grid = build_wall_grid(walls)
+        GEO_PATH  = f"{GEO_ROOT}/{scene_id}.npy"
+        WALL_PATH = f"{WALL_ROOT}/{scene_id}.npy"
+        PVW_PATH  = f"{PVW_ROOT}/{scene_id}.npy"
+        PVP_PATH  = f"{PVP_ROOT}/{scene_id}.npy"
 
-    print("[Build] PVP")
-    PVP = build_PVP(geo, walls, PVW, wall_grid)
+        if not os.path.exists(GEO_PATH):
+            print(f"[Skip] Scene {scene_id} no geo", flush=True)
+            return
 
-    os.makedirs(PVP_DIR, exist_ok=True)
-    np.save(PVP_PATH, PVP)
+        if os.path.exists(PVP_PATH):
+            print(f"[Skip] Scene {scene_id} already exists", flush=True)
+            return
 
-    print(f"[Done] PVP saved to {PVP_PATH}")
+        geo   = np.load(GEO_PATH)
+        walls = np.load(WALL_PATH, allow_pickle=True).tolist()
+        PVW   = np.load(PVW_PATH, allow_pickle=True)
+
+        wall_grid = build_wall_grid(walls)
+        PVP = build_PVP(geo, walls, PVW, wall_grid)
+
+        os.makedirs(PVP_ROOT, exist_ok=True)
+        np.save(PVP_PATH, PVP)
+
+        print(f"[Done] Scene {scene_id}", flush=True)
+
+        return scene_id
+
+    except Exception as e:
+        print(f"[Error] Scene {scene_id} -> {e}", flush=True)
+        return
 
 # =======================
-# entry
+# 多进程入口
 # =======================
 
 if __name__ == "__main__":
-    main()
+
+    scenes = list(range(400, 701))
+    n_proc = max(1, cpu_count() - 1)
+
+    print("Using", n_proc, "processes", flush=True)
+
+    with Pool(n_proc) as pool:
+        list(tqdm(pool.imap_unordered(run_scene, scenes),
+                  total=len(scenes),
+                  desc="Building PVP 0-700"))
