@@ -1,13 +1,13 @@
 import multiprocessing as mp
 import subprocess
-
-SCRIPT_PATH = "solver.py"
+import sys
+SCRIPT_PATH = r"C:\Users\ZSwinB\Documents\GitHub\2DGeoDistanceField\solver.py"
 
 SCENE_START = 0
 SCENE_END = 700
 
-TX_START = 0
-TX_END = 79
+TX_START = 80
+TX_END = 103
 
 NUM_WORKERS = mp.cpu_count()
 
@@ -17,15 +17,17 @@ def run_tx(args):
     scene_id, tx_id = args
 
     cmd = [
-        "python3",
+        sys.executable,
         SCRIPT_PATH,
         str(scene_id),
         str(tx_id)
     ]
-
     print(f"[START] scene={scene_id} tx={tx_id}")
 
-    subprocess.run(cmd)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    print(result.stdout)
+    print(result.stderr)
 
     print(f"[DONE] scene={scene_id} tx={tx_id}")
 

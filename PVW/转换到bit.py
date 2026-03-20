@@ -1,13 +1,13 @@
 import numpy as np
 import os
 
-PVW_ROOT  = r"D:\Desktop\RM\data\PVW"
-WALL_ROOT= r"D:\Desktop\RM\data\wall_segment"
-OUT_ROOT   = "D:\Desktop\RM\data\PVW_mask"
+PVW_ROOT  = r"G:\data_SRM\data\PVW"
+WALL_ROOT= r"G:\data_SRM\wall_segment"
+OUT_ROOT   = "E:\RMdata\PVW_mask"
 
 os.makedirs(OUT_ROOT, exist_ok=True)
 
-for scene_id in range(1):
+for scene_id in range(701):
     pvw_path  = f"{PVW_ROOT}/{scene_id}.npy"
     wall_path = f"{WALL_ROOT}/{scene_id}.npy"
     out_path  = f"{OUT_ROOT}/{scene_id}.npy"

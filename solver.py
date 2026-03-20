@@ -7,25 +7,22 @@ from collections import defaultdict
 import random
 from numba import njit
 # =====================================================
-# 参数
+# 参数注意，现在由于是DPM，而且是扩展天线，我把gain给关了，记得IRT或者正常天线，打开
 # =====================================================
 MAX_DIST = 1000.0
 
-GEO_ROOT  = r"/root/RM/geo"
-ANT_ROOT  = r"/root/RM/antenna"
-GAIN_ROOT = r"/root/RM/IRT2"
+GEO_ROOT  = r"G:\data_SRM\geo"
+ANT_ROOT  = r"G:\data_SRM\antenna"
+#GAIN_ROOT = r"G:\RadioMapSeer\gain\DPM"
 
-WALL_ROOT = r"/root/wall_segment_DRM"
-WWV_ROOT  = r"/root/RM/data/WWV"
-PVW_ROOT  = r"/root/RM/data/PVW"
-PVP_ROOT  = r"/root/RM/data/PVP"
-PVP_ID_ROOT = r"/root/RM/data/PVP_id"
-PVP_CSR_ROOT = r"/root/RM/data/PVP_csr"
-CORNER_TABLE_ROOT = r"/root/RM/data/corner_table"
-PVW_MASK_ROOT = r"/dev/shm/PVW_mask"
-DST_ROOT = r"/root/wall_segment_DRM_nb"
-OUT_DIR = r"/root/RM/distance_map_DRM"
-LOG_PATH = r"/root/RM/debug_profile.log"
+WALL_ROOT = r"G:\data_SRM\wall_segment"
+WWV_ROOT  = r"G:\data_SRM\data\WWV"
+PVP_ID_ROOT = r"G:\data_SRM\data\PVP_id"
+PVP_CSR_ROOT = r"G:\data_SRM\data\PVP_csr"
+CORNER_TABLE_ROOT = r"G:\data_SRM\data\corner_table"
+PVW_MASK_ROOT = r"E:\RMdata\PVW_mask"
+DST_ROOT = r"G:\data_SRM\wall_segment_nb"
+OUT_DIR = r"E:\RMdata\distance_map_DRM"
 
 GRID_SIZE = 8
 import sys
@@ -1156,10 +1153,10 @@ def main():
         return
 
     MAIN_START_TIME = time.perf_counter()
-    K = 2
+    K = 1
     geo  = np.load(f"{GEO_ROOT}/{SCENE_ID}.npy")
     ant  = np.load(f"{ANT_ROOT}/{SCENE_ID}_{TX_ID}.npy")
-    gray = np.array(Image.open(f"{GAIN_ROOT}/{SCENE_ID}_{TX_ID}.png").convert("L"))
+    #gray = np.array(Image.open(f"{GAIN_ROOT}/{SCENE_ID}_{TX_ID}.png").convert("L"))
 
     walls = np.load(f"{WALL_ROOT}/{SCENE_ID}.npy", allow_pickle=True).tolist()
     WWV   = np.load(f"{WWV_ROOT}/{SCENE_ID}.npy")
@@ -1195,7 +1192,9 @@ def main():
     TX_wall_order.sort()
     TX_wall_order = [w for _, w in TX_wall_order]
     TX_wall_order = np.array(TX_wall_order, dtype=np.int32)
-    searchable = (geo == 0) & (gray > 0)
+    #searchable = (geo == 0) & (gray > 0)
+    searchable = (geo == 0) 
+
     rx_list = np.argwhere(searchable)
     tx_img = []
 
