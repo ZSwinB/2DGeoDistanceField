@@ -964,7 +964,7 @@ dist_map = data["dist_map"]
 ```
 
 
-```markdown
+
 
 ## Project Overview
 
@@ -1554,7 +1554,7 @@ dist_map = data["dist_map"]
 
 
 
-```markdown
+
 ## ⚠️ Known Issue: Reflection Point Visibility
 
 ### Summary
