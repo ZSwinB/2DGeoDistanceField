@@ -1,258 +1,378 @@
 # 2DGeoDistanceField
 输入地理信息与发射天线位置，计算自由空间内的TOA场。 支持直射、反射与绕射路径，最多两次碰撞；可扩展输出多径距离与相位信息。
-## 墙段数据（Wall Segment Data）
+# 设计思想
 
-### 输入
-- **geo**：二维栅格地图  
-  - `shape = (H, W)`  
-  - `geo[i, j] == 1` 表示墙体  
-  - `geo[i, j] == 0` 表示自由空间  
+系统将问题拆分为三部分：
 
-### 输出
-- **文件名**：`scene_id.npy`  
-- **数据类型**：`numpy.ndarray(dtype=object)`  
-- **数据结构**：
+- **Geometry（几何）**：静态信息  
+- **Precompute（预计算）**：一次生成，可重复复用  
+- **Simulation（仿真）**：针对具体发射机执行  
 
-    ```python
-    walls = [
-        ((x1, y1), (x2, y2)),
-        ((x3, y3), (x4, y4)),
-        ...
-    ]
-    ```
+### 核心优势
 
-- 每个元素表示一条墙段  
-- 墙段由两个端点 `(x, y)` 表示，坐标基于地图索引  
-
-### Index 约定
-- `index` 指 `walls` 数组中的顺序索引  
-- 索引顺序即墙段在生成时的存储顺序  
-- 后续模块通过该 `index` 直接引用对应墙段
-## WWVmove 数据
-
-### 输入
-- **geo**：二维栅格地图  
-  - `shape = (H, W)`  
-  - `geo[i, j] == 1` 表示墙体  
-  - `geo[i, j] == 0` 表示自由空间  
-
-- **walls**：墙段数据  
-  - 来自 `wall_segment/scene_id.npy`  
-  - `walls[index] = (A, B)`  
-  - `A, B` 为墙段两个端点 `(x, y)`
+- 将复杂几何关系提前处理为中间表示  
+- 避免重复几何建模  
+- 多发射机共享预计算结果  
+- 提升大规模仿真效率
+- 仅仿真时间，加快仿真速度  
 
 ---
 
-### 输出
-- **文件名**：`scene_id.npy`  
-- **数据类型**：`dict`
+# 当前项目定位
 
-- **数据结构**：
+本项目不追求完整传统射线追踪结果，而聚焦于**传播时间大规模数据集的计算**。
 
-    ```python
-    WWVmove = {
-        wid: [dir_A, dir_B],
-        ...
-    }
-    ```
+### 适用场景
 
-- `wid` 为墙段的 index  
-- `dir_A` / `dir_B` 为对应端点的移动方向  
-- 移动方向采用 8 邻域方向 `(dx, dy)`  
-- 若端点周围不存在自由空间方向，则为 `None`
+- 大规模快速仿真  
+- 时延 / 距离估计  
+- 数据集生成  
+- 神经网络训练数据生产  
+- 多发射机场景评估  
 
----
+在多数工程和数据驱动任务中，传播时间信息已足够支撑后续应用。
 
-### Index 约定
-- `wid` 与 `walls` 中的索引一致  
-- `WWVmove[wid]` 与 `walls[wid]` 一一对应  
-## PVW / WWV 数据
+## 项目目录结构
 
-### 输入
-- **geo**：二维栅格地图  
-  - `shape = (H, W)`  
-  - `geo[i, j] == 1` 表示墙体  
-  - `geo[i, j] == 0` 表示自由空间  
+```text
+project/
+│
+├── config.py                # 全局配置（路径 / 开关 / 并行）
+├── README.md                # 项目说明文档
+├── run_all.py               # 一键运行（预处理 + 仿真）
+├── run_intermdata.py        # 仅生成中间数据（预计算阶段）
+│
+├── pipeline/
+│   ├── stage1_input/
+│   │   └── load_geo.py      # 加载场景数据（geometry / antenna / gain）
+│   │
+│   ├── stage2_wall/
+│   │   ├── run.py           # 从 geometry 构建墙段（当前默认实现）
+│   │   └── degreewall.py    # 历史版本方法（保留，非默认）
+│   │
+│   ├── stage3_middata/
+│   │   ├── build_pvw.py     # PVW：点到可见墙
+│   │   ├── build_pvp.py     # PVP：点到可见端点
+│   │   └── build_wwv.py     # WWV：墙到墙可见性
+│   │
+│   ├── stage4_convert/
+│   │   └── run.py           # 中间数据转换，适配底层高性能计算
+│   │
+│   └── stage5_sim/
+│       ├── solver.py        # 单发射机传播计算
+│       └── batch_run.py     # 多发射机批量仿真调度
+│
+└── utils/
+    └── ...                  # 工具脚本（可视化 / 检查 / 数据处理等）
+# 项目整体结构
 
-- **walls**：墙段数据  
-  - 来自 `wall_segment/scene_id.npy`  
-  - `walls[index] = (A, B)`  
-  - `A, B` 为墙段两个端点 `(x, y)`
+本项目采用分阶段流水线结构：
 
-- **WWVmove**：墙段端点的自由空间方向  
-  - 来自 `WWVmove/scene_id.npy`  
-  - `WWVmove[wid] = [dir_A, dir_B]`  
-  - `dir_A / dir_B` 为 8 邻域方向 `(dx, dy)` 或 `None`
-
----
-
-## PVW（Point Visible Walls）
-
-### 输出
-- **文件名**：`PVW/scene_id.npy`  
-- **数据类型**：`numpy.ndarray(dtype=object)`  
-- **形状**：`(H, W)`
-
-- **数据结构**：
-
-    ```python
-    PVW[y, x] = [w0, w1, w2, ...]
-    ```
-
-- 仅对 `geo[y, x] == 0`（自由空间点）有定义  
-- 列表中元素为**从该点可见的墙段 index**
-
-### Index 约定
-- `w` 为 `walls` 中的索引  
-- `PVW[y, x]` 中的索引与 `walls[w]` 一一对应  
+```
+输入 → 几何处理 → 预计算 → 数据转换 → 仿真
+```
 
 ---
 
-## WWV（Wall–Wall Visibility）
+# 各阶段说明
 
-### 输出
-- **文件名**：`WWV/scene_id.npy`  
-- **数据类型**：`numpy.ndarray(dtype=bool)`  
-- **形状**：`(N_walls, N_walls)`
+## Stage 1：输入
 
-- **数据结构**：
+`stage1_input/load_geo.py` 用于加载场景相关输入数据，主要包括：
 
-    ```python
-    WWV[i, j] = True / False
-    ```
+- 几何结构
+- 天线信息
+- 增益信息
 
-- `WWV[i, j] == True` 表示墙段 `i` 与墙段 `j` 至少存在一个自由空间视点可见  
-- 矩阵为对称矩阵，且 `WWV[i, i] == False`
-
-### Index 约定
-- `i, j` 均为 `walls` 中的索引  
-- `WWV` 与 `walls` 使用同一套 index 体系  
-
-## PVW_mask 数据
-
-### 输入
-- **PVW**：点–墙可见性列表  
-  - 来自 `PVW/scene_id.npy`  
-  - `PVW[y, x] = [w0, w1, ...]` 或 `None`
-
-- **walls**：墙段数据  
-  - 来自 `wall_segment/scene_id.npy`  
-  - 用于确定墙段总数与索引范围
+这一阶段负责将外部数据整理为后续流水线可直接使用的内部格式。
 
 ---
 
-### 输出
-- **文件名**：`PVW_mask/scene_id.npy`  
-- **数据类型**：`numpy.ndarray(dtype=bool)`  
-- **形状**：`(H, W, N_wall)`
+## Stage 2：墙体构建
 
-- **数据结构**：
-
-    ```python
-    PVW_mask[y, x, w] = True / False
-    ```
-
-- `PVW_mask[y, x, w] == True` 表示  
-  自由空间点 `(x, y)` 与墙段 `w` 可见
-
-- 对于 `PVW[y, x] is None` 的位置，整行保持为 `False`
+- `stage2_wall/run.py`：从几何数据中构建墙段表示，供后续可见性计算使用  
+- `stage2_wall/degreewall.py`：历史版本实现（保留用于参考，不是当前默认方法）
 
 ---
 
-### Index 约定
-- `w` 为 `walls` 中的索引  
-- 第三个维度与 `walls` 的 index 一一对应  
+## Stage 3：中间数据预计算
 
-## PVP 数据
+该阶段为系统核心，用于构建可复用的几何关系表示。
 
-PVP 描述的是：  
-**自由空间中的一个点，与墙段端点（vertex）之间的可见关系。**  
-这里的 *vertex* 指的是墙段的端点，而不是墙段本身。
+### 中间数据类型
 
----
+- **PVW（Point Visible Walls）**：每个点可见的墙集合  
+- **PVP（Point Visible Points）**：每个点可见的关键端点集合  
+- **WWV（Wall Wall Visibility）**：墙与墙之间的可见关系  
 
-## 原始语义（逻辑层）
+### 目标
 
-对于自由空间中的一个点 `(x, y)`：  
-- 先确定该点可见的墙段  
-- 再判断该点是否能“看到”这些墙段的端点  
-- 若点到端点之间不存在严格遮挡，则认为该端点可见  
-
-逻辑表示为：  
-PVP[y, x] = [(vx1, vy1), (vx2, vy2), ...]
+将复杂几何关系预处理为结构化数据，供仿真阶段直接复用。
 
 ---
 
-## 实际存储（压缩表示）
+## Stage 4：数据转换
 
-为了节省存储空间，不直接存储端点坐标，而是进行 ID 化。
+`stage4_convert/run.py` 负责将中间数据转换为适合高性能计算的数据格式。
 
-### 1. corner_table（端点表）
+### 主要工作
 
-- **文件名**：`PVP/corner_table/scene_id.npy`  
-- **数据类型**：`numpy.ndarray`
+- 调整数据布局  
+- 转换为更适合底层执行的表示  
+- 减少仿真阶段运行时开销  
 
-结构：  
-corner_table[id] = (vx, vy)
-
-说明：  
-- 每一个唯一出现过的墙段端点分配一个**全局 id**  
-- `(vx, vy)` 顺序固定为 `(x, y)`，不交换
+该阶段本质是：**面向计算内核的数据准备**
 
 ---
 
-### 2. PVP_id（点–端点 ID 关系）
+## Stage 5：仿真
 
-- **文件名**：`PVP_id/scene_id.npy`  
-- **数据类型**：`numpy.ndarray(dtype=object)`  
-- **形状**：`(H, W)`
+- `stage5_sim/solver.py`：单个发射机传播计算  
+- `stage5_sim/batch_run.py`：批量仿真调度  
 
-数据结构：  
-PVP_id[y, x] = [id0, id1, id2, ...]
+### 含义划分
 
-说明：  
-- 列表中的 `id` 对应 `corner_table[id]`  
-- 若该点没有可见端点，则为 `[]`
+- `solver.py`：执行具体计算  
+- `batch_run.py`：负责调度多个发射机  
 
 ---
 
-## Index 约定
+# 运行入口
 
-- `id` 为 `corner_table` 中的索引  
-- `PVP_id[y, x]` 中的每个 `id` 可通过  
-  `corner_table[id]`  
-  还原为端点坐标 `(vx, vy)`  
-- 端点来源于 `walls[wid]` 的端点，但 `PVP_id` **不直接存储 `wid`**
+## 1. 仅生成中间数据
+
+```bash
+python run_intermdata.py
+```
+
+用于执行预计算流程，生成仿真所需的中间数据。
+
+---
+
+## 2. 执行完整流程
+
+```bash
+python run_all.py
+```
+
+包含：
+
+- 中间数据生成  
+- 仿真计算  
+
+---
+
+
+
+
+
+
+
+
+
+
+## ⚠️ Known Issue: Reflection Point Visibility
+
+### Summary
+
+The current reflection implementation may generate **physically invalid reflection paths**.
+
+This happens because the algorithm:
+
+* Validates visibility at the **wall level**
+* But does **not validate the actual reflection point on the wall**
+
+---
+
+### Problem Description
+
+A reflection is currently accepted if:
+
+* The TX image and RX form a line that intersects the wall (CCW test)
+* Both TX and RX are marked as “visible” to that wall (via PVW / masks)
+
+However, this does **not guarantee** that:
+
+> The actual intersection point (reflection point) is visible from both TX and RX.
+
+---
+
+### Typical Failure Scenario
+
+This issue commonly occurs in geometries like:
+
+* Long walls partially inside structures
+* Thin protruding wall segments
+* Walls with partially occluded regions
+
+Example:
+
+* A wall is globally visible
+* But the actual reflection point lies on a **hidden segment**
+* The algorithm still accepts the reflection
+
+---
+
+### Root Cause
+
+* Visibility is computed using **wall endpoints**
+* Reflection happens at an **arbitrary point on the wall**
+* No verification is performed at that exact point
+
+---
+
+### Impact
+
+* Introduces **false reflection paths**
+* Affects both:
+
+  * First-order reflections
+  * Second-order reflections
+
+---
+
+### Current Status
+
+* This issue is **known and accepted** in the current version
+* No fix is applied yet to preserve performance
+
+---
+
+### Planned Fix (Next Version)
+
+For each reflection candidate:
+
+1. Compute the **reflection point** (line-wall intersection)
+2. Validate visibility:
+
+   * TX → reflection point
+   * RX → reflection point
+3. Accept the reflection **only if both are visible**
+
+---
+
+### Second-Order Reflection (Future Fix)
+
+For paths:
+
+```text
+TX → P1 → P2 → RX
+```
+
+Required visibility checks:
+
+* TX → P1
+* P1 → P2
+* P2 → RX
+
+---
+
+### Implementation Notes
+
+Recommended pipeline:
+
+1. Fast pruning (existing):
+
+   * Masks (TX_mask / RX_mask)
+   * Distance pruning
+   * CCW intersection
+2. Compute intersection point (only for valid candidates)
+3. Apply `visible_fast` checks as final validation
+
+---
+
+### Trade-off
+
+| Aspect     | Current Version | Next Version      |
+| ---------- | --------------- | ----------------- |
+| Speed      | ✅ Fast          | ⚠ Slightly slower |
+| Accuracy   | ⚠ Approximate   | ✅ Correct         |
+| Complexity | ✅ Low           | ⚠ Higher          |
+
+---
+
+### Notes
+
+* Issue frequency depends on geometry complexity
+* More likely in dense urban layouts or irregular structures
+
+---
+
+If needed, this can be extended into:
+
+* A reproducible test case
+* Benchmark comparisons before/after fix
+
 
 
 ---
 
-### 数据生成顺序（仿真前置）
+## 🩹 Current Mitigation (Applied in This Version)
 
-在开始射线 / 路径仿真之前，需要依次生成以下数据：
+To reduce invalid reflections caused by thin protruding structures, a preprocessing step has been introduced on wall geometry:
 
-1. **geo**  
-   - 场景的二维栅格地图
+### Spur Removal (8-neighborhood 2-core pruning)
 
-2. **wall_segment**  
-   - 从 `geo` 中提取的墙段数据
+Before extracting wall segments, we apply an iterative pruning process:
 
-3. **WWVmove**  
-   - 每个墙段端点对应的自由空间方向
+* Treat contour pixels as a graph (8-neighborhood connectivity)
+* Iteratively remove pixels with degree ≤ 1
+* Continue until convergence
 
-4. **PVW**  
-   - 自由空间中每个点可见的墙段索引列表
+---
 
-5. **PVW_mask**（可选）  
-   - `PVW` 的布尔掩码形式，用于加速计算
+### Effect
 
-6. **WWV**  
-   - 墙段–墙段之间的可见性关系
+This removes:
 
-7. **PVP（逻辑）**  
-   - 自由空间点与墙段端点之间的可见关系
+* Thin wall protrusions (spikes)
+* Small dangling structures
+* Non-physical contour artifacts
 
-8. **corner_table + PVP_id（存储）**  
-   - 对 PVP 进行 ID 化后的压缩存储表示
+As a result:
 
-完成以上数据生成后，即可进入后续的路径、反射、绕射与距离/相位仿真阶段。
+> Many invalid reflection paths (caused by these structures) are eliminated at the geometry level.
+
+---
+
+### Rationale
+
+The original issue arises because:
+
+* Reflection validation is performed at the wall level
+* But thin protrusions introduce artificial wall segments
+* These segments generate physically invalid reflection points
+
+By removing such structures:
+
+* The wall representation becomes more physically consistent
+* Reflection errors are significantly reduced without modifying core logic
+
+---
+
+### Trade-offs
+
+| Aspect      | Impact                                  |
+| ----------- | --------------------------------------- |
+| Performance | ✅ No impact on runtime reflection stage |
+| Accuracy    | ⚠ Still approximate (not fully fixed)   |
+| Geometry    | ⚠ May remove very thin valid structures |
+
+---
+
+### Limitations
+
+* This does **not fully solve** the reflection point visibility issue
+* It only reduces the frequency of problematic cases
+
+---
+
+### Future Work
+
+Planned improvement (next version):
+
+* Explicitly compute reflection points
+* Validate visibility at the reflection point (TX → P and RX → P)
+
+---
+

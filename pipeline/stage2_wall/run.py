@@ -2,10 +2,46 @@ import numpy as np
 import cv2
 import os
 from utils.io import save_npy
+from collections import deque
+
+
+def prune_spurs(contour):
+
+    S = set(contour)
+
+    nbr8 = [(dx, dy) for dx in (-1,0,1)
+                     for dy in (-1,0,1)
+                     if not (dx == 0 and dy == 0)]
+
+    deg = {}
+    for x, y in S:
+        cnt = 0
+        for dx, dy in nbr8:
+            if (x+dx, y+dy) in S:
+                cnt += 1
+        deg[(x,y)] = cnt
+
+    q = deque([p for p in S if deg[p] <= 1])
+
+    while q:
+        p = q.popleft()
+        if p not in S:
+            continue
+
+        S.remove(p)
+
+        x, y = p
+        for dx, dy in nbr8:
+            nb = (x+dx, y+dy)
+            if nb in S:
+                deg[nb] -= 1
+                if deg[nb] <= 1:
+                    q.append(nb)
+
+    return S
 
 
 def run(geo, config):
-
     idx = config.IDX
 
     save_path = os.path.join(
@@ -41,6 +77,23 @@ def run(geo, config):
             continue
 
         pts = cnt.squeeze()
+        # ===== 去毛刺（2-core 剥离）=====
+        pts_list = [tuple(p) for p in pts]
+
+        pts_pruned = prune_spurs(pts_list)
+
+        # ⚠ 防御：避免删空 / 太小
+        if len(pts_pruned) < 2:
+            continue
+
+        # ⚠ 转回有序序列（保持原 contour 顺序）
+        pts = np.array(
+            [p for p in pts_list if p in pts_pruned],
+            dtype=np.int32
+        )
+
+        if len(pts) < 2:
+            continue
 
         # ✅ 关键修复2：防止 squeeze 变成 (2,)
         if pts.ndim != 2 or pts.shape[1] != 2:

@@ -11,8 +11,8 @@ if ROOT not in sys.path:
 
 from config import Config
 config = Config()
-SCENE_ID =5
-HIGHLIGHT_IDX = 317  # 手动指定
+SCENE_ID =0
+HIGHLIGHT_IDX =700  # 手动指定
 
 # ===============================
 # 路径（使用 config）

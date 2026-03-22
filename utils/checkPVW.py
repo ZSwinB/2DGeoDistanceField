@@ -15,9 +15,9 @@ from config import Config
 # ===============================
 config = Config()
 
-SCENE_ID = 0
-query_y = 1
-query_x = 0
+SCENE_ID = 2
+query_y = 249
+query_x = 192
 
 # ===============================
 # debug 输出目录

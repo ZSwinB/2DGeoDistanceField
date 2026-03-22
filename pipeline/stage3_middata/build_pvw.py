@@ -11,7 +11,19 @@ from utils.io import save_npy, load_npy
 
 GRID_SIZE = 256
 EPS = 1e-9
+walls_global = None
 
+def init_worker(walls):
+    global walls_global
+    walls_global = walls
+
+def worker_chunk(points_chunk):
+    out = []
+    for y, x in points_chunk:
+        mask = visible_walls_for_point_nb((x, y), walls_global)
+        vis = np.where(mask)[0].tolist()
+        out.append((y, x, vis))
+    return out
 
 # ================= 几何工具 =================
 
@@ -46,49 +58,105 @@ def ray_segment_distance_nb(px, py, theta, ax, ay, bx, by):
 
 # ================= 单点可见性 =================
 
+@njit
 def visible_walls_for_point_nb(P, walls):
 
-    px, py = P
+    px = P[0]
+    py = P[1]
 
-    events = []
+    num_walls = walls.shape[0]
+    max_events = num_walls * 4
 
-    for i in range(walls.shape[0]):
+    events_angle = np.empty(max_events, dtype=np.float64)
+    events_idx   = np.empty(max_events, dtype=np.int32)
+
+    cnt = 0
+
+    # ===== 构建 events =====
+    for i in range(num_walls):
 
         ax = walls[i, 0]
         ay = walls[i, 1]
         bx = walls[i, 2]
         by = walls[i, 3]
 
-        a1 = angle_xy(px, py, ax, ay)
-        a2 = angle_xy(px, py, bx, by)
+        a1 = math.atan2(ay - py, ax - px)
+        a2 = math.atan2(by - py, bx - px)
 
-        l = min(a1, a2)
-        r = max(a1, a2)
+        if a1 < a2:
+            l = a1
+            r = a2
+        else:
+            l = a2
+            r = a1
 
         if r - l > math.pi + 1e-9:
-            events.append((l, i))
-            events.append(( math.pi, i))
-            events.append((-math.pi, i))
-            events.append((r, i))
+            events_angle[cnt] = l
+            events_idx[cnt] = i
+            cnt += 1
+
+            events_angle[cnt] = math.pi
+            events_idx[cnt] = i
+            cnt += 1
+
+            events_angle[cnt] = -math.pi
+            events_idx[cnt] = i
+            cnt += 1
+
+            events_angle[cnt] = r
+            events_idx[cnt] = i
+            cnt += 1
         else:
-            events.append((l, i))
-            events.append((r, i))
+            events_angle[cnt] = l
+            events_idx[cnt] = i
+            cnt += 1
 
-    events.sort()
+            events_angle[cnt] = r
+            events_idx[cnt] = i
+            cnt += 1
 
-    active = set()
-    visible = set()
+    # ===== 排序（稳定 + 二级键 idx）=====
+    order = np.arange(cnt)
 
-    for k in range(len(events) - 1):
+    for i in range(1, cnt):
+        key = order[i]
+        j = i - 1
 
-        ang, idx = events[k]
+        while j >= 0:
+            a1 = events_angle[order[j]]
+            a2 = events_angle[key]
 
-        if idx in active:
-            active.remove(idx)
+            if a1 > a2:
+                order[j + 1] = order[j]
+            elif abs(a1 - a2) < 1e-12:
+                if events_idx[order[j]] > events_idx[key]:
+                    order[j + 1] = order[j]
+                else:
+                    break
+            else:
+                break
+
+            j -= 1
+
+        order[j + 1] = key
+
+    # ===== active / visible =====
+    active  = np.zeros(num_walls, dtype=np.uint8)
+    visible = np.zeros(num_walls, dtype=np.uint8)
+
+    # ===== 扫描 =====
+    for k in range(cnt - 1):
+
+        idx = events_idx[order[k]]
+
+        # toggle
+        if active[idx]:
+            active[idx] = 0
         else:
-            active.add(idx)
+            active[idx] = 1
 
-        next_ang = events[k + 1][0]
+        ang = events_angle[order[k]]
+        next_ang = events_angle[order[k + 1]]
 
         if next_ang - ang < 1e-6:
             continue
@@ -98,30 +166,33 @@ def visible_walls_for_point_nb(P, walls):
         best_d = 1e18
         best_i = -1
 
-        for i2 in active:
+        for i2 in range(num_walls):
 
-            ax = walls[i2, 0]
-            ay = walls[i2, 1]
-            bx = walls[i2, 2]
-            by = walls[i2, 3]
+            if active[i2]:
 
-            d = ray_segment_distance_nb(px, py, theta, ax, ay, bx, by)
+                ax = walls[i2, 0]
+                ay = walls[i2, 1]
+                bx = walls[i2, 2]
+                by = walls[i2, 3]
 
-            if d > 1e-9 and d < best_d:
-                best_d = d
-                best_i = i2
+                d = ray_segment_distance_nb(px, py, theta, ax, ay, bx, by)
+
+                if d > 1e-9 and d < best_d:
+                    best_d = d
+                    best_i = i2
 
         if best_i != -1:
-            visible.add(best_i)
+            visible[best_i] = 1
 
-    return list(visible)
+    return visible
 
 # ================= worker =================
 
 def worker_point_task(args):
     y, x, walls = args
     P = (x, y)
-    vis = visible_walls_for_point_nb(P, walls)
+    mask = visible_walls_for_point_nb(P, walls)
+    vis = np.where(mask)[0].tolist()
     return y, x, vis
 
 
@@ -173,13 +244,21 @@ def build_pvw(geo, wall_segment, config):
         n = config.INNER_WORKERS or mp.cpu_count()
         print(f"[PVW] inner multiprocess | workers={n}")
 
-        with mp.Pool(n) as pool:
-            for y, x, vis in tqdm(
-                pool.imap_unordered(worker_point_task, tasks),
-                total=len(tasks),
-                desc="PVW"
-            ):
-                visible_walls[y, x] = vis
+        with mp.Pool(n, initializer=init_worker, initargs=(walls_nb,)) as pool:
+
+            # ===== chunk 切分 =====
+            n_chunks = n * 4
+            chunks = np.array_split(free_points, n_chunks)
+
+            # ===== 并行 =====
+            pbar = tqdm(total=len(free_points), desc="PVW")
+
+            for results in pool.imap_unordered(worker_chunk, chunks):
+                for y, x, vis in results:
+                    visible_walls[y, x] = vis
+                pbar.update(len(results))
+
+            pbar.close()
 
     else:
 

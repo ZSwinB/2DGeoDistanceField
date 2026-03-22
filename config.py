@@ -43,18 +43,18 @@ class Config:
     INNER_WORKERS =8
     # config.py
 
-    IDX_LIST = list(range(40,45))  # 要跑哪些scene
-    TX_LIST  = list(range(0, 8))
+    IDX_LIST = list(range(0,1))  # 要跑哪些scene
+    TX_LIST  = list(range(0, 50))
 
     NUM_WORKERS = None   # None=自动
     # =====================
     # 运行控制
     # =====================
 
-    GEN_WALL = False
+    GEN_WALL = True
     GEN_PVW  = True
     GEN_WWV  = True
     GEN_PVP  = True
-    GEN_CONVERT = False
+    GEN_CONVERT = True
 
     # 仿真不在这里跑（交给 batch）

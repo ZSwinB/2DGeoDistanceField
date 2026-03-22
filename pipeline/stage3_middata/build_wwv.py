@@ -209,13 +209,35 @@ def build_wwv(geo, wall_segment, config):
         (i, walls[i][0], walls[i][1], walls, WWVmove)
         for i in range(N_walls)
     ]
-
+    
     print("[Build] WWV")
 
-    with mp.Pool(mp.cpu_count()) as pool:
-        for wid, vis in tqdm(pool.imap_unordered(worker_wall_task, wall_tasks),
-                             total=len(wall_tasks),
-                             desc="WWV"):
+    if config.USE_INNER_MP:
+
+        n = config.INNER_WORKERS or mp.cpu_count()
+        print(f"[WWV] inner multiprocess | workers={n}")
+
+        with mp.Pool(n) as pool:
+
+            pbar = tqdm(total=len(wall_tasks), desc="WWV")
+
+            for wid, vis in pool.imap_unordered(worker_wall_task, wall_tasks):
+                for j in vis:
+                    WWV[wid, j] = True
+                    WWV[j, wid] = True
+                pbar.update(1)
+
+            pbar.close()
+
+    else:
+
+        print("[WWV] single process")
+
+        for wid, vis in tqdm(
+            map(worker_wall_task, wall_tasks),
+            total=len(wall_tasks),
+            desc="WWV"
+        ):
             for j in vis:
                 WWV[wid, j] = True
                 WWV[j, wid] = True
