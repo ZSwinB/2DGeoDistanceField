@@ -1,15 +1,17 @@
 import multiprocessing as mp
 import subprocess
 import sys
+import time   # ✅ 新增
+
 SCRIPT_PATH = r"C:\Users\ZSwinB\Documents\GitHub\2DGeoDistanceField\solver.py"
 
-SCENE_START = 0
+SCENE_START = 684
 SCENE_END = 700
 
 TX_START = 80
 TX_END = 103
 
-NUM_WORKERS = mp.cpu_count()
+NUM_WORKERS = max(1, mp.cpu_count() // 2)
 
 
 def run_tx(args):
@@ -22,12 +24,10 @@ def run_tx(args):
         str(scene_id),
         str(tx_id)
     ]
+
     print(f"[START] scene={scene_id} tx={tx_id}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    print(result.stdout)
-    print(result.stderr)
+    subprocess.run(cmd)
 
     print(f"[DONE] scene={scene_id} tx={tx_id}")
 
@@ -38,8 +38,11 @@ def run_scene(scene_id):
 
     tasks = [(scene_id, tx) for tx in range(TX_START, TX_END + 1)]
 
-    with mp.Pool(NUM_WORKERS) as pool:
+    with mp.Pool(NUM_WORKERS, maxtasksperchild=1) as pool:
         pool.map(run_tx, tasks)
+
+    # ✅ 关键补丁：释放系统资源
+    time.sleep(0.5)
 
 
 def main():
@@ -49,4 +52,8 @@ def main():
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn", force=True)
+
+    mp.freeze_support()   # ✅ 再加一层保险
+
     main()
