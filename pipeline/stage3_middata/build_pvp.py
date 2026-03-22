@@ -19,11 +19,27 @@ GRID_SIZE = 8
 
 @njit
 def orient_nb(ax, ay, bx, by, cx, cy):
+    """
+    Compute orientation (cross product) of three points.
+
+    Returns:
+        float: positive if counter-clockwise, negative if clockwise, zero if collinear
+    """
     return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
 
 
 @njit
 def segment_intersect_strict_nb(ax, ay, bx, by, cx, cy, dx, dy):
+    """
+    Check strict intersection between two segments AB and CD.
+
+    Behavior:
+        - Uses orientation test
+        - Excludes collinear and endpoint-touching cases
+
+    Returns:
+        bool: True if segments strictly intersect
+    """
     o1 = orient_nb(ax, ay, bx, by, cx, cy)
     o2 = orient_nb(ax, ay, bx, by, dx, dy)
     o3 = orient_nb(cx, cy, dx, dy, ax, ay)
@@ -41,6 +57,24 @@ def visible_fast_nb(
     grid_list,
     skip_w
 ):
+    """
+    Fast visibility check between two points using grid acceleration.
+
+    Behavior:
+        - Traverses grid cells intersecting the segment
+        - Tests intersection with candidate walls
+        - Optionally skips one wall index (for endpoint cases)
+
+    Args:
+        x0, y0: source point
+        x1, y1: target point
+        walls (np.ndarray): wall segments (N,4)
+        grid_start, grid_count, grid_list: CSR-style grid structure
+        skip_w (int): wall index to skip (-1 means no skip)
+
+    Returns:
+        bool: True if visible (no intersection), False otherwise
+    """
 
     gx0 = int(min(x0, x1) // GRID_SIZE)
     gx1 = int(max(x0, x1) // GRID_SIZE)
@@ -81,6 +115,25 @@ def visible_fast_nb(
 # =======================
 
 def build_wall_grid_nb(walls, H, W):
+    """
+    Build spatial grid index for walls (CSR-like structure).
+
+    Behavior:
+        - Partitions space into GRID_SIZE cells
+        - Assigns each wall to overlapping grid cells
+        - Produces compact indexing arrays
+
+    Args:
+        walls (np.ndarray): wall segments (N,4)
+        H (int): grid height
+        W (int): grid width
+
+    Returns:
+        tuple:
+            grid_start (np.ndarray): start index per cell
+            grid_count (np.ndarray): number of walls per cell
+            grid_list (np.ndarray): flattened wall indices
+    """
 
     GX = (W + GRID_SIZE) // GRID_SIZE
     GY = (H + GRID_SIZE) // GRID_SIZE
@@ -141,6 +194,13 @@ def build_wall_grid_nb(walls, H, W):
 # =======================
 
 def init_worker_pvp(walls_, PVW_, grid_start_, grid_count_, grid_list_):
+    """
+    Initialize global variables for multiprocessing workers.
+
+    Behavior:
+        - Stores shared data in module-level globals
+        - Avoids repeated serialization for each task
+    """
     global walls_global, PVW_global
     global grid_start_global, grid_count_global, grid_list_global
 
@@ -152,6 +212,21 @@ def init_worker_pvp(walls_, PVW_, grid_start_, grid_count_, grid_list_):
 
 
 def worker_chunk_pvp(points_chunk):
+    """
+    Process a chunk of points to compute PVP.
+
+    Behavior:
+        - For each point, finds visible wall endpoints
+        - Uses PVW as candidate pruning
+        - Applies visibility test per endpoint
+
+    Args:
+        points_chunk (np.ndarray): array of (y, x) points
+
+    Returns:
+        list:
+            [(y, x, [(x1,y1), (x2,y2), ...]), ...]
+    """
     out = []
 
     for y, x in points_chunk:
@@ -212,49 +287,28 @@ def worker_chunk_pvp(points_chunk):
 
 def build_pvp(geo, wall_segment, pvw, config):
     """
-    输入:
-        geo:
-            2D ndarray (H, W)
-            0 表示 free，其它表示障碍
+    Build Point Visible Points (PVP) for the scene.
 
-        wall_segment:
-            不使用（已废弃，保留接口兼容）
-            实际从磁盘读取:
-                convert/{idx}/walls_nb.npy
-            格式:
-                (N, 4) → [ax, ay, bx, by]
+    Behavior:
+        - Loads walls_nb and PVW from disk
+        - Builds grid acceleration structure
+        - For each free-space point:
+            - retrieves visible walls (PVW)
+            - tests visibility to wall endpoints
+        - Supports optional multiprocessing
 
-        pvw:
-            不使用（已废弃，保留接口兼容）
-            实际从磁盘读取:
-                PVW/{idx}.npy
-            格式:
-                (H, W) object array
-                每个元素: list[int]（可见墙索引）
+    Args:
+        geo (np.ndarray): geometry map (H, W), 0=free, others=obstacle
+        wall_segment: unused (kept for compatibility)
+        pvw: unused (kept for compatibility)
+        config: configuration object
 
-        config:
-            需要字段:
-                IDX
-                OUTPUT_ROOT
-                PVW_DIR
-                PVP_DIR
-                USE_INNER_MP
-                INNER_WORKERS
-
-    内部构建:
-        grid (numba CSR形式):
-            grid_start: (GX, GY)
-            grid_count: (GX, GY)
-            grid_list : (total,)
-
-    输出:
-        PVP:
-            (H, W) object array
-            每个元素: list[(x, y)]
-            表示该点可见的墙端点集合
-
-        保存路径:
+    Output:
+        - Saves PVP to:
             OUTPUT_ROOT / PVP_DIR / {idx}.npy
+
+    Returns:
+        None
     """
     idx = config.IDX
 

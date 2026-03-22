@@ -5,11 +5,35 @@ from utils.io import load_npy, save_npy
 
 def run(pvw, wwv, pvp, config):
     """
-    输入:
-        pvw, wwv, pvp（不使用，统一从磁盘读取）
+    Convert intermediate data into compute-optimized formats.
 
-    输出:
-        所有转换结果（落盘）
+    Behavior:
+        - Ignores input arguments (pvw, wwv, pvp) and loads data from disk
+        - Converts:
+            PVW → dense boolean mask (H, W, N_wall)
+            PVP → indexed representation (corner_table + PVP_id)
+            PVP_id → CSR-like structure (flat / start / len)
+            walls → numeric array (walls_nb)
+        - Saves all outputs under:
+            OUTPUT_ROOT / convert / {idx}/
+
+    Args:
+        pvw: unused (kept for interface compatibility)
+        wwv: unused (kept for interface compatibility)
+        pvp: unused (kept for interface compatibility)
+        config: configuration object
+
+    Outputs:
+        PVW_mask.npy   : (H, W, N_wall) bool
+        PVP_flat.npy   : (total,) int32
+        PVP_start.npy  : (H, W) int32
+        PVP_len.npy    : (H, W) int16
+        corner_x.npy   : (N_corner,) float32
+        corner_y.npy   : (N_corner,) float32
+        walls_nb.npy   : (N_wall, 4) float64
+
+    Returns:
+        None
     """
 
     idx = config.IDX

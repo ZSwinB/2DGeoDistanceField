@@ -6,7 +6,20 @@ from collections import deque
 
 
 def prune_spurs(contour):
+    """
+    Remove spurs (degree <= 1 points) from a contour using iterative pruning (2-core extraction).
 
+    Behavior:
+        - Treats contour points as an undirected graph with 8-neighborhood connectivity
+        - Iteratively removes points with degree <= 1
+        - Returns the remaining core points
+
+    Args:
+        contour (list[tuple[int, int]]): list of (x, y) points representing the contour
+
+    Returns:
+        set[tuple[int, int]]: pruned set of contour points (2-core)
+    """
     S = set(contour)
 
     nbr8 = [(dx, dy) for dx in (-1,0,1)
@@ -42,6 +55,28 @@ def prune_spurs(contour):
 
 
 def run(geo, config):
+    """
+    Generate wall segments from geometry and save results.
+
+    Behavior:
+        - Extracts contours from binary geometry
+        - Removes spurs using 2-core pruning
+        - Splits contours into directional segments
+        - Saves:
+            1. raw segments (object array)
+            2. numeric wall representation (walls_nb)
+
+    Args:
+        geo (np.ndarray): binary geometry map (uint8 or bool)
+        config: configuration object containing paths and scene index
+
+    Outputs:
+        - {OUTPUT_ROOT}/{WALL_DIR}/{idx}.npy
+        - {OUTPUT_ROOT}/convert/{idx}/walls_nb.npy
+
+    Returns:
+        None
+    """
     idx = config.IDX
 
     save_path = os.path.join(

@@ -18,7 +18,11 @@ import sys
 # 参数
 # =====================================================
 MAX_DIST = 1000.0
+config = Config()
 
+K = config.K #在config里面改
+DIFF_BIAS = config.DIFF_BIAS
+FALLBACK_BIAS = config.FALLBACK_BIAS
 # ===== 输入 =====
 
 # ===== 中间数据 =====
@@ -43,7 +47,17 @@ NUM_RX = 5000
 # 基础几何（不改）
 # =====================================================
 def build_wall_grid(walls):
+    """
+    Build grid index (dict-based) for wall segments.
 
+    Behavior:
+        - Divides space into GRID_SIZE cells
+        - Maps each grid cell to wall indices overlapping it
+
+    Returns:
+        dict:
+            {(gx, gy): [wall_idx, ...]}
+    """
 
     grid = {}
     for idx, (A, B) in enumerate(walls):
@@ -119,7 +133,16 @@ def segment_intersect2(a, b, c, d, eps=1):
 
 
 def visible_fast(p1, p2, walls, wall_grid, skip_w=None):
+    """
+    Fast visibility check using grid acceleration.
 
+    Behavior:
+        - Traverses relevant grid cells
+        - Tests segment intersection against candidate walls
+
+    Returns:
+        bool: True if visible, False if blocked
+    """
 
     x0, y0 = p1
     x1, y1 = p2
@@ -161,6 +184,12 @@ def visible_fast(p1, p2, walls, wall_grid, skip_w=None):
 
 
 def build_wall_grid_nb(walls, H, W):
+    """
+    Build numba-compatible grid (CSR-like).
+
+    Returns:
+        grid_start, grid_count, grid_list
+    """
 
     GX = int(np.ceil((W + 1) / GRID_SIZE))
     GY = int(np.ceil((H + 1) / GRID_SIZE))
@@ -232,7 +261,12 @@ def visible_fast_nb(
     grid_list,
     skip_w
 ):
+    """
+    Numba-accelerated visibility check.
 
+    Returns:
+        bool: True if visible, False otherwise
+    """
     gx0 = int(min(x0, x1) // GRID_SIZE)
     gx1 = int(max(x0, x1) // GRID_SIZE)
     gy0 = int(min(y0, y1) // GRID_SIZE)
@@ -352,6 +386,12 @@ def second_reflection_dist_nb(
     best,
     eps
 ):
+    """
+    Compute second-order reflection path distance with pruning.
+
+    Returns:
+        float: updated best distance
+    """
     # ---------- TX 侧两次反射 ----------
     tx1x, tx1y = reflect_point_nb(tx_x, tx_y, w1x1, w1y1, w1x2, w1y2)
     tx2x, tx2y = reflect_point_nb(tx1x, tx1y, w2x1, w2y1, w2x2, w2y2)
@@ -388,6 +428,12 @@ def second_reflection_dist_nb(
 
 @njit
 def reflect_point_nb(px, py, ax, ay, bx, by):
+    """
+    Reflect a point across a wall segment.
+
+    Returns:
+        tuple[float, float]: reflected point
+    """
     # wall direction
     vx = bx - ax
     vy = by - ay
@@ -461,6 +507,12 @@ def diffraction_2nd_mirror_nb(
     corner_x, corner_y,
     best
 ):
+    """
+    Compute diffraction combined with reflection (mirror method).
+
+    Returns:
+        np.ndarray: updated best distances
+    """
 
     K = best.shape[0]
 
@@ -468,7 +520,7 @@ def diffraction_2nd_mirror_nb(
     # 进入 reference space
     # ------------------------------------------------
     for k in range(K):
-        best[k] -= 300.0
+        best[k] -= DIFF_BIAS
 
     start_tx = PVP_start[tx_y, tx_x]
     len_tx   = PVP_len[tx_y, tx_x]
@@ -479,7 +531,7 @@ def diffraction_2nd_mirror_nb(
     if len_tx == 0 and len_rx == 0:
 
         for k in range(K):
-            best[k] += 300.0
+            best[k] += DIFF_BIAS
 
         return best
 
@@ -644,7 +696,7 @@ def diffraction_2nd_mirror_nb(
     # 恢复 penalty
     # ------------------------------------------------
     for k in range(K):
-        best[k] += 300.0
+        best[k] += DIFF_BIAS
 
     return best
 
@@ -657,6 +709,12 @@ def diffraction_toa_nb(
     corner_x, corner_y,
     best
 ):
+    """
+    Compute diffraction path (corner-based) with top-K update.
+
+    Returns:
+        np.ndarray: updated best distances
+    """
 
     K = best.shape[0]
 
@@ -664,7 +722,7 @@ def diffraction_toa_nb(
     # 进入函数：统一减 penalty（参考空间）
     # ------------------------------------------------
     for k in range(K):
-        best[k] -= 300.0
+        best[k] -= DIFF_BIAS
 
     start_tx = PVP_start[tx_y, tx_x]
     len_tx   = PVP_len[tx_y, tx_x]
@@ -676,7 +734,7 @@ def diffraction_toa_nb(
 
         # 恢复 penalty
         for k in range(K):
-            best[k] += 300.0
+            best[k] += DIFF_BIAS
 
         return best
 
@@ -723,7 +781,7 @@ def diffraction_toa_nb(
     # 退出函数：恢复 penalty
     # ------------------------------------------------
     for k in range(K):
-        best[k] += 300.0
+        best[k] += DIFF_BIAS
 
     return best
 
@@ -794,6 +852,95 @@ def solver_rx_loop(
     K,
     MAX_DIST
 ):
+    """
+    Core per-receiver solving loop (fully numba-accelerated).
+
+    High-level:
+        For each receiver (rx), compute top-K shortest propagation paths
+        from transmitter (tx) under multiple mechanisms:
+            - Direct path (LOS)
+            - First-order reflection
+            - Second-order reflection
+            - Diffraction (corner-based)
+            - Diffraction + reflection (hybrid)
+
+    ------------------------------------------------
+    Per-receiver workflow:
+    ------------------------------------------------
+
+    1. Initialization:
+        - Initialize `best` array of size K with MAX_DIST
+        - Insert a large penalized Euclidean distance (baseline upper bound)
+
+    2. Line-of-Sight (LOS):
+        - Check visibility using grid-accelerated intersection test
+        - If visible, insert direct Euclidean distance into top-K
+
+    3. Reflection (mirror method):
+        For each wall w1 visible from TX:
+            - Compute mirrored TX position (tx_img[w1])
+            - Lower-bound pruning: skip if distance ≥ current worst best[K-1]
+
+        3.1 First-order reflection:
+            - If RX can see wall w1 (RX_mask[w1])
+            - Validate reflection geometry (intersection on wall)
+            - Insert distance if valid
+
+        3.2 Second-order reflection:
+            - Candidate walls w2 = RX_mask ∩ WWV[w1]
+            - For each w2:
+                - Reflect TX again across w2
+                - Lower-bound pruning
+                - Validate double-reflection geometry
+                - Insert distance if valid
+
+    4. Diffraction (corner-based):
+        - Triggered only if (euclidean + penalty) < current worst
+        - Uses shared visible corners (PVP) between TX and RX
+        - Computes path: TX → corner → RX
+        - Updates top-K
+
+    5. Diffraction + reflection:
+        - Also gated by same pruning condition
+        - Two symmetric cases:
+            (a) TX mirrored → diffraction → RX
+            (b) RX mirrored → diffraction → TX
+        - Uses wall visibility + corner visibility + grid occlusion checks
+        - Updates top-K
+
+    6. Write-back:
+        - Store final sorted top-K distances into dist_map[i, j, :]
+
+    ------------------------------------------------
+    Key optimizations:
+    ------------------------------------------------
+    - Top-K maintenance via insertion sort (small K)
+    - Strong lower-bound pruning before expensive geometry checks
+    - Grid-based spatial acceleration for visibility
+    - PVW_mask reduces candidate walls
+    - WWV prunes second-order reflection pairs
+    - PVP CSR structure enables fast corner lookup
+    - All heavy loops run inside numba (no Python overhead)
+
+    ------------------------------------------------
+    Data dependencies:
+    ------------------------------------------------
+    - PVW_mask:
+        Per-point visible walls (prunes reflection candidates)
+
+    - WWV:
+        Wall-to-wall visibility (prunes second reflection pairs)
+
+    - PVP (CSR):
+        Corner visibility for diffraction
+
+    - grid_*:
+        Spatial index for fast intersection tests
+
+    ------------------------------------------------
+    Returns:
+        None (results written in-place to dist_map)
+    """
 
     for n in range(rx_list.shape[0]):
 
@@ -814,7 +961,7 @@ def solver_rx_loop(
         dy = tx_y - rx_y
         euclid = (dx*dx + dy*dy) ** 0.5
 
-        insert_topk(best, euclid + 600)
+        insert_topk(best, euclid + FALLBACK_BIAS)
 
         # LOS
         if visible_fast_nb(
@@ -896,7 +1043,7 @@ def solver_rx_loop(
         # diffraction
         # ------------------------------------------------
 
-        if euclid + 300 < best[-1]:
+        if euclid + DIFF_BIAS < best[-1]:
 
             best = diffraction_toa_nb(
                 tx_x, tx_y,
@@ -910,7 +1057,7 @@ def solver_rx_loop(
         # diffraction + reflection
         # ------------------------------------------------
 
-        if euclid + 300 < best[-1]:
+        if euclid + DIFF_BIAS < best[-1]:
 
             best = diffraction_2nd_mirror_nb(
                 tx_x, tx_y,
@@ -1147,10 +1294,25 @@ def diffraction_2nd_mirror(
 # ================= 主流程 =================
 
 def main():
+    """
+    Entry point for simulation.
+
+    Behavior:
+        - Loads geometry and precomputed data
+        - Builds acceleration structures
+        - Runs solver over all receiver points
+        - Saves compressed result
+
+    CLI:
+        python solver.py IDX TX_ID
+
+    Output:
+        outputs/sim/{IDX}_{TX_ID}.npz
+    """
 
     MAIN_START_TIME = time.perf_counter()
-    K = 1
-    config = Config()
+
+
     # =====================================================
     # 读取（只改这里）
     # =====================================================

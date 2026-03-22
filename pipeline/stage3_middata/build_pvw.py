@@ -14,10 +14,34 @@ EPS = 1e-9
 walls_global = None
 
 def init_worker(walls):
+    """
+    Initialize global wall data for multiprocessing workers.
+
+    Behavior:
+        - Stores wall segments in a global variable
+        - Avoids repeated data transfer to each worker
+
+    Args:
+        walls (np.ndarray): wall segments (N,4)
+    """
     global walls_global
     walls_global = walls
 
 def worker_chunk(points_chunk):
+    """
+    Process a chunk of points to compute visible walls (PVW).
+
+    Behavior:
+        - For each point, computes visible walls using numba kernel
+        - Converts boolean mask to index list
+
+    Args:
+        points_chunk (np.ndarray): array of (y, x) points
+
+    Returns:
+        list:
+            [(y, x, [wall_idx, ...]), ...]
+    """
     out = []
     for y, x in points_chunk:
         mask = visible_walls_for_point_nb((x, y), walls_global)
@@ -28,14 +52,39 @@ def worker_chunk(points_chunk):
 # ================= 几何工具 =================
 
 def angle(P, Q):
+    """
+    Compute angle from point P to Q.
+
+    Returns:
+        float: angle in radians (range [-pi, pi])
+    """
     return math.atan2(Q[1] - P[1], Q[0] - P[0])
 
 @njit
 def angle_xy(px, py, qx, qy):
+    """
+    Compute angle between two points using raw coordinates.
+
+    Returns:
+        float: angle in radians (range [-pi, pi])
+    """
     return math.atan2(qy - py, qx - px)
 
 @njit
 def ray_segment_distance_nb(px, py, theta, ax, ay, bx, by):
+    """
+    Compute intersection distance between a ray and a segment.
+
+    Behavior:
+        - Ray starts at (px, py) with direction theta
+        - Segment defined by A(ax,ay) → B(bx,by)
+        - Returns first valid intersection distance
+
+    Returns:
+        float:
+            distance t if intersection exists (t > 0),
+            -1.0 if no valid intersection
+    """
 
     dx = math.cos(theta)
     dy = math.sin(theta)
@@ -60,6 +109,23 @@ def ray_segment_distance_nb(px, py, theta, ax, ay, bx, by):
 
 @njit
 def visible_walls_for_point_nb(P, walls):
+    """
+    Compute visible walls from a single point using angular sweep.
+
+    Behavior:
+        - Builds angular events for all wall endpoints
+        - Performs sweep-line over angle domain
+        - Tracks active walls and finds nearest intersection
+        - Marks visible walls
+
+    Args:
+        P (tuple[float, float]): query point (x, y)
+        walls (np.ndarray): wall segments (N,4)
+
+    Returns:
+        np.ndarray:
+            binary mask (N,), 1 means visible, 0 means not visible
+    """
 
     px = P[0]
     py = P[1]
@@ -189,6 +255,16 @@ def visible_walls_for_point_nb(P, walls):
 # ================= worker =================
 
 def worker_point_task(args):
+    """
+    Compute visible walls for a single point (non-chunk version).
+
+    Args:
+        args: (y, x, walls)
+
+    Returns:
+        tuple:
+            (y, x, [visible wall indices])
+    """
     y, x, walls = args
     P = (x, y)
     mask = visible_walls_for_point_nb(P, walls)
@@ -200,12 +276,25 @@ def worker_point_task(args):
 
 def build_pvw(geo, wall_segment, config):
     """
-    输入:
-        geo
-        wall_segment（不使用，从磁盘读取）
+    Build Point Visible Walls (PVW) for the scene.
 
-    输出:
-        PVW（落盘）
+    Behavior:
+        - Loads wall segments (walls_nb) from disk
+        - Iterates over all free-space points
+        - Computes visible walls using angular sweep
+        - Supports optional multiprocessing
+
+    Args:
+        geo (np.ndarray): geometry map (H, W), 0=free, others=obstacle
+        wall_segment: unused (kept for compatibility)
+        config: configuration object
+
+    Output:
+        - Saves PVW to:
+            OUTPUT_ROOT / PVW_DIR / {idx}.npy
+
+    Returns:
+        None
     """
 
     idx = config.IDX

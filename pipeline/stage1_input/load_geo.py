@@ -7,12 +7,19 @@ from PIL import Image
 
 def _load_binary(base_path):
     """
-    尝试读取：
-        base_path.npy
-        base_path.png
+    Load binary data from disk.
 
-    返回：
-        0/1 np.array 或 None
+    Tries the following in order:
+        1. base_path + ".npy"
+        2. base_path + ".png"
+
+    Args:
+        base_path (str): File path without extension.
+
+    Returns:
+        np.ndarray | None:
+            Binary array (uint8, values in {0,1}) if found,
+            otherwise None.
     """
 
     npy_path = base_path + ".npy"
@@ -34,10 +41,25 @@ def _load_binary(base_path):
 
 def load_geo(config, tx_id=None):
     """
-    返回：
-        geo
-        antenna（可为None）
-        gain（可为None）
+    Load geometry, antenna, and gain data for a given scene.
+
+    Behavior:
+        - Geometry is loaded from multiple GEO_ROOT entries and merged
+          using logical OR
+        - Antenna and gain are optional and only loaded if tx_id is provided
+
+    Args:
+        config: configuration object containing data paths and scene index
+        tx_id (int | None): transmitter index (optional)
+
+    Returns:
+        tuple:
+            geo (np.ndarray): merged geometry (uint8, {0,1})
+            antenna (np.ndarray | None): antenna mask if available
+            gain (np.ndarray | None): gain data if available
+
+    Raises:
+        FileNotFoundError: if no geometry data is found for the scene
     """
 
     idx = config.IDX

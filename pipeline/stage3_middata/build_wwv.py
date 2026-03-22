@@ -25,10 +25,31 @@ DIRECTIONS_8 = [
 # ================= WWVmove 工具 =================
 
 def in_bounds(x, y, W, H):
+    """
+    Check whether a coordinate is within image bounds.
+
+    Returns:
+        bool: True if inside [0,W) x [0,H), otherwise False
+    """
     return 0 <= x < W and 0 <= y < H
 
 
 def first_free_dir(P, geo):
+    """
+    Find the first free direction (8-neighborhood) from a point.
+
+    Behavior:
+        - Rounds P to nearest grid coordinate
+        - Searches 8 directions for a free cell (geo == 0)
+
+    Args:
+        P (tuple[float, float]): point (x, y)
+        geo (np.ndarray): geometry map
+
+    Returns:
+        tuple[int, int] | None:
+            direction (dx, dy) if found, otherwise None
+    """
     H, W = geo.shape
     x0, y0 = int(round(P[0])), int(round(P[1]))
 
@@ -45,7 +66,20 @@ def first_free_dir(P, geo):
 
 def build_WWVmove(geo, walls):
     """
-    WWVmove[wid] = [dir_for_A, dir_for_B]
+    Build movement directions for each wall endpoint.
+
+    Behavior:
+        - For each wall, computes a valid offset direction
+          from both endpoints into free space
+
+    Args:
+        geo (np.ndarray): geometry map
+        walls: list of wall segments [(A,B), ...]
+
+    Returns:
+        dict:
+            {wall_id: [dir_A, dir_B]}
+            each dir is (dx, dy) or None
     """
     WWVmove = {}
 
@@ -61,10 +95,28 @@ def build_WWVmove(geo, walls):
 # ================= 几何工具 =================
 
 def angle(P, Q):
+    """
+    Compute angle from point P to Q.
+
+    Returns:
+        float: angle in radians [-pi, pi]
+    """
     return math.atan2(Q[1] - P[1], Q[0] - P[0])
 
 
 def ray_segment_distance(P, theta, A, B):
+    """
+    Compute intersection distance between a ray and a segment.
+
+    Behavior:
+        - Ray starts at P with direction theta
+        - Segment defined by A → B
+        - Returns closest valid intersection
+
+    Returns:
+        float | None:
+            distance if intersection exists, otherwise None
+    """
     px, py = P
     dx = math.cos(theta)
     dy = math.sin(theta)
@@ -87,6 +139,21 @@ def ray_segment_distance(P, theta, A, B):
 # ================= 可见性 =================
 
 def visible_walls_for_point(P, walls):
+    """
+    Compute visible walls from a point using angular sweep.
+
+    Behavior:
+        - Builds angular events from wall endpoints
+        - Performs sweep-line over angle domain
+        - Tracks active walls and selects nearest intersection
+
+    Args:
+        P (tuple[float, float]): query point
+        walls: list of wall segments
+
+    Returns:
+        list[int]: indices of visible walls
+    """
     events = []
 
     for i, (A, B) in enumerate(walls):
@@ -143,6 +210,22 @@ def visible_walls_for_point(P, walls):
 # ================= worker =================
 
 def worker_wall_task(args):
+    """
+    Compute wall-to-wall visibility for a single wall.
+
+    Behavior:
+        - Offsets endpoints slightly into free space
+        - Computes visible walls from both endpoints
+        - Merges results and removes self
+
+    Args:
+        args:
+            (wall_id, A, B, walls, WWVmove)
+
+    Returns:
+        tuple:
+            (wall_id, set of visible wall indices)
+    """
     wall_id, A, B, walls, WWVmove = args
 
     moveA, moveB = WWVmove[wall_id]
@@ -170,12 +253,27 @@ def worker_wall_task(args):
 
 def build_wwv(geo, wall_segment, config):
     """
-    输入:
-        geo
-        wall_segment（不使用，从磁盘读取）
+    Build Wall-Wall Visibility (WWV) matrix.
 
-    输出:
-        WWV（落盘）
+    Behavior:
+        - Loads wall segments from disk
+        - Computes WWVmove (endpoint directions)
+        - For each wall:
+            - computes visible walls from endpoints
+        - Fills symmetric visibility matrix
+        - Supports optional multiprocessing
+
+    Args:
+        geo (np.ndarray): geometry map
+        wall_segment: unused (kept for compatibility)
+        config: configuration object
+
+    Output:
+        - Saves WWV to:
+            OUTPUT_ROOT / WWV_DIR / {idx}.npy
+
+    Returns:
+        None
     """
 
     idx = config.IDX
