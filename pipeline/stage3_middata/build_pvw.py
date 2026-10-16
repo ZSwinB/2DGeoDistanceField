@@ -5,6 +5,7 @@ from numba import njit
 from tqdm import tqdm
 import multiprocessing as mp
 from utils.io import save_npy, load_npy
+from utils.angular_events import sort_angular_events
 
 
 # ================= 参数（保持原样） =================
@@ -182,29 +183,7 @@ def visible_walls_for_point_nb(P, walls):
             cnt += 1
 
     # ===== 排序（稳定 + 二级键 idx）=====
-    order = np.arange(cnt)
-
-    for i in range(1, cnt):
-        key = order[i]
-        j = i - 1
-
-        while j >= 0:
-            a1 = events_angle[order[j]]
-            a2 = events_angle[key]
-
-            if a1 > a2:
-                order[j + 1] = order[j]
-            elif abs(a1 - a2) < 1e-12:
-                if events_idx[order[j]] > events_idx[key]:
-                    order[j + 1] = order[j]
-                else:
-                    break
-            else:
-                break
-
-            j -= 1
-
-        order[j + 1] = key
+    order = sort_angular_events(events_angle, events_idx, cnt)
 
     # ===== active / visible =====
     active  = np.zeros(num_walls, dtype=np.uint8)

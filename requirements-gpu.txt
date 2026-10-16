@@ -1,0 +1,5 @@
+# Versions used for the validated production run (Python 3.12, Linux + CUDA).
+numpy==2.3.2
+numba==0.68.0
+llvmlite==0.50.0
+numcodecs==0.17.0

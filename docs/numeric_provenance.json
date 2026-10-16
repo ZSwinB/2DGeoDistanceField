@@ -1,0 +1,118 @@
+{
+  "origin": "Validated production_20261016 frozen runtime",
+  "production_signature": "9405c3ddf6e2c398f6985b3d204d10efd2c06b8eb0a8d2505bd9acd70035042e",
+  "modules": [
+    {
+      "module": "accelerated/corner_cache.py",
+      "production_sha256": "8c74f73d703b2ce6cd15ac0a66970c3511104da9dff10f87400c2aa3264ec059",
+      "repository_sha256": "ff5d212374b4a1bb908c9e28076830b5e207b735a338162effc9325d43f10b75",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/cpu_solver.py",
+      "production_sha256": "27c99ea15e806f607f3d2415a7dc048a8033dc2bd5ee39da49cd4e8d1d0a9903",
+      "repository_sha256": "fb3bc5de833f165656a4a1cb93cad604cc3c0af929c50a6398995a47fc61385a",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/cpu_visibility.py",
+      "production_sha256": "12d1177d69e0cb9277a86fe73e008d97d5ebd2a39dc877454c0faf7ada34e1ca",
+      "repository_sha256": "12d1177d69e0cb9277a86fe73e008d97d5ebd2a39dc877454c0faf7ada34e1ca",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/geometry.py",
+      "production_sha256": "ef59072bc9511f1fc3749cd52f01650543a8dbc7f6409fc6b0420d3f185bce8e",
+      "repository_sha256": "ef59072bc9511f1fc3749cd52f01650543a8dbc7f6409fc6b0420d3f185bce8e",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/gpu_solver_packed_generated.py",
+      "production_sha256": "99b5522372cab897c67611233ca48d6f7073cd66e77fa7738c2cf2f4e6ad5a31",
+      "repository_sha256": "99b5522372cab897c67611233ca48d6f7073cd66e77fa7738c2cf2f4e6ad5a31",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/lossless_distance.py",
+      "production_sha256": "50b5aec13f847e3326715b9ea2615e22c08ed9fe785019bd33332f8e180118a4",
+      "repository_sha256": "50b5aec13f847e3326715b9ea2615e22c08ed9fe785019bd33332f8e180118a4",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/native_grid.py",
+      "production_sha256": "ddcbea4e7ea0dfcac32bc734e4ef3eb5a37501e16371eda2892543c4d0f74ae1",
+      "repository_sha256": "ddcbea4e7ea0dfcac32bc734e4ef3eb5a37501e16371eda2892543c4d0f74ae1",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/native_solver.py",
+      "production_sha256": "49a88be064fa629d4bf07514769f35dddb29198ada4818675d59c4fbc6417d45",
+      "repository_sha256": "50deb1bb53d4fa929ef41272da6243105737ecbe8762b28dd0f069e6052fd103",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/native_wwv.py",
+      "production_sha256": "bb69b7f29e97e31fca1eb147544678714a149badc21085455b8ef06ad05f7956",
+      "repository_sha256": "bb69b7f29e97e31fca1eb147544678714a149badc21085455b8ef06ad05f7956",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/pipeline_fast_cpu.py",
+      "production_sha256": "921466e16c2d7b36f383aec8cce510ea086b54fab4c98b686afb5b048f66a097",
+      "repository_sha256": "921466e16c2d7b36f383aec8cce510ea086b54fab4c98b686afb5b048f66a097",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/r3_gpu.py",
+      "production_sha256": "37cfb9cb054b2af52744b9c4130f18e3fb9f953e6c39396f9b39aaa12dfa45cf",
+      "repository_sha256": "cd7bf48031296c36c5c5b7e9e527a3246f7ad1c74e8b8f186dec9c82d6740e2e",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/r3_numeric.py",
+      "production_sha256": "827721a9cd72f3aa562cdb8368d57b892d11dc7ff9329db30542add215e9712b",
+      "repository_sha256": "71927011f92c68f51d45638fad01e807495e601add958f6d48c16f5cdb4e75f5",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/r3_pvw.py",
+      "production_sha256": "5a8307a0fea384781ee2a2d49d6380ec7df650468872ba70dbabe009bdc1b7c6",
+      "repository_sha256": "b7761ce6a1074cffa4b00126e52ac95288eaf7835e39d36a9046e335104227d7",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/r3_sort.py",
+      "production_sha256": "27e7ba9df4abd3b27bf2f044e856b2652b1e18b14f2296f60d3be18812e70134",
+      "repository_sha256": "27e7ba9df4abd3b27bf2f044e856b2652b1e18b14f2296f60d3be18812e70134",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/source_visibility.py",
+      "production_sha256": "19e0a262187a65fc1c34eb433367d14be5305412f6fbf54e4a4c001a10f0faff",
+      "repository_sha256": "0fb848534bc73cbf4dd550410d5af712970e751a90dcfe753ca37c53cd149e4f",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    },
+    {
+      "module": "accelerated/wwv_numeric.py",
+      "production_sha256": "2ae07552d9db8bc6ed323df4eb8f46d846fcc7dfd8674870e53e76f8da0a14ee",
+      "repository_sha256": "2ae07552d9db8bc6ed323df4eb8f46d846fcc7dfd8674870e53e76f8da0a14ee",
+      "change": "relative imports only",
+      "non_import_AST_unchanged": true
+    }
+  ]
+}

@@ -11,6 +11,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 from config import Config
+from utils.visibility import visible_between_points_nb
 from pipeline.stage1_input.load_geo import load_geo
 import sys
 
@@ -252,53 +253,8 @@ def build_wall_grid_nb(walls, H, W):
 
 
 @njit
-def visible_fast_nb(
-    x0, y0,
-    x1, y1,
-    walls,
-    grid_start,
-    grid_count,
-    grid_list,
-    skip_w
-):
-    """
-    Numba-accelerated visibility check.
-
-    Returns:
-        bool: True if visible, False otherwise
-    """
-    gx0 = int(min(x0, x1) // GRID_SIZE)
-    gx1 = int(max(x0, x1) // GRID_SIZE)
-    gy0 = int(min(y0, y1) // GRID_SIZE)
-    gy1 = int(max(y0, y1) // GRID_SIZE)
-
-    for gx in range(gx0, gx1 + 1):
-        for gy in range(gy0, gy1 + 1):
-
-            start = grid_start[gx, gy]
-            count = grid_count[gx, gy]
-
-            for k in range(start, start + count):
-
-                idx = grid_list[k]
-
-                if skip_w != -1 and idx == skip_w:
-                    continue
-
-                xA = walls[idx, 0]
-                yA = walls[idx, 1]
-                xB = walls[idx, 2]
-                yB = walls[idx, 3]
-
-                if segment_intersect_strict_nb(
-                    x0, y0,
-                    x1, y1,
-                    xA, yA,
-                    xB, yB
-                ):
-                    return False
-
-    return True
+def visible_fast_nb(x0,y0,x1,y1,walls,grid_start,grid_count,grid_list,skip_w):
+    return visible_between_points_nb(x0,y0,x1,y1,walls,grid_start,grid_count,grid_list,skip_w,GRID_SIZE)
 
 @njit
 def segment_intersect_strict_nb(
@@ -378,52 +334,31 @@ def valid_first_reflection_nb(
 
 
 @njit
-def second_reflection_dist_nb(
-    tx_x, tx_y,
-    rx_x, rx_y,
-    w1x1, w1y1, w1x2, w1y2,
-    w2x1, w2y1, w2x2, w2y2,
-    best,
-    eps
-):
-    """
-    Compute second-order reflection path distance with pruning.
+def first_reflection_visible_nb(tx_x,tx_y,rx_x,rx_y,img_x,img_y,w,walls,gs,gc,gl):
+    ax,ay,bx,by=walls[w]
+    ok,px,py=intersect_wall_return_point_nb(img_x,img_y,rx_x,rx_y,ax,ay,bx,by)
+    if not ok:return False
+    return (visible_fast_nb(tx_x,tx_y,px,py,walls,gs,gc,gl,w)
+            and visible_fast_nb(px,py,rx_x,rx_y,walls,gs,gc,gl,w))
 
-    Returns:
-        float: updated best distance
-    """
-    # ---------- TX 侧两次反射 ----------
-    tx1x, tx1y = reflect_point_nb(tx_x, tx_y, w1x1, w1y1, w1x2, w1y2)
-    tx2x, tx2y = reflect_point_nb(tx1x, tx1y, w2x1, w2y1, w2x2, w2y2)
+@njit
+def second_reflection_dist_nb(tx_x,tx_y,rx_x,rx_y,w1x1,w1y1,w1x2,w1y2,w2x1,w2y1,w2x2,w2y2,best,eps,w1,w2,walls,gs,gc,gl):
+    tx1x,tx1y=reflect_point_nb(tx_x,tx_y,w1x1,w1y1,w1x2,w1y2)
+    tx2x,tx2y=reflect_point_nb(tx1x,tx1y,w2x1,w2y1,w2x2,w2y2)
+    distance=dist2d_nb(tx2x,tx2y,rx_x,rx_y)
+    if distance>=best:return best
+    ok2,p2x,p2y=intersect_wall_return_point_nb(tx2x,tx2y,rx_x,rx_y,w2x1,w2y1,w2x2,w2y2,eps)
+    if not ok2:return best
+    ok1,p1x,p1y=intersect_wall_return_point_nb(tx1x,tx1y,p2x,p2y,w1x1,w1y1,w1x2,w1y2,eps)
+    if not ok1:return best
+    # A specular bounce stays on the same side of its support wall.
+    if orient_nb(w1x1,w1y1,w1x2,w1y2,tx_x,tx_y)*orient_nb(w1x1,w1y1,w1x2,w1y2,p2x,p2y)<-eps:return best
+    if orient_nb(w2x1,w2y1,w2x2,w2y2,p1x,p1y)*orient_nb(w2x1,w2y1,w2x2,w2y2,rx_x,rx_y)<-eps:return best
+    if not visible_fast_nb(tx_x,tx_y,p1x,p1y,walls,gs,gc,gl,w1):return best
+    if not visible_fast_nb(p1x,p1y,p2x,p2y,walls,gs,gc,gl,-1):return best
+    if not visible_fast_nb(p2x,p2y,rx_x,rx_y,walls,gs,gc,gl,w2):return best
+    return distance
 
-    # ---------- RX 侧两次反射 ----------
-    rx1x, rx1y = reflect_point_nb(rx_x, rx_y, w2x1, w2y1, w2x2, w2y2)
-    rx2x, rx2y = reflect_point_nb(rx1x, rx1y, w1x1, w1y1, w1x2, w1y2)
-
-
-    # ---------- 距离（真实路径） ----------
-    d = dist2d_nb(tx2x, tx2y, rx_x, rx_y)
-    if d >= best:
-        return best   # 剪枝
-
-    # ---------- 几何可行性 ----------
-    if not segment_intersect2_nb(
-        tx2x, tx2y,
-        rx_x, rx_y,
-        w2x1, w2y1, w2x2, w2y2,
-        eps
-    ):
-        return best
-
-    if not segment_intersect2_nb(
-        rx2x, rx2y,
-        tx_x, tx_y,
-        w1x1, w1y1, w1x2, w1y2,
-        eps
-    ):
-        return best
-
-    return d
 
 
 @njit
@@ -572,6 +507,8 @@ def diffraction_2nd_mirror_nb(
 
             if not ok:
                 continue
+            if not visible_fast_nb(tx_x,tx_y,rxp,ryp,walls_nb,grid_start,grid_count,grid_list,w):
+                continue
 
             if not visible_fast_nb(
                 rxp, ryp,
@@ -650,6 +587,8 @@ def diffraction_2nd_mirror_nb(
             )
 
             if not ok:
+                continue
+            if not visible_fast_nb(rxp,ryp,rx_x,rx_y,walls_nb,grid_start,grid_count,grid_list,w):
                 continue
 
             if not visible_fast_nb(
@@ -998,12 +937,7 @@ def solver_rx_loop(
 
                 if RX_mask[w1]:
 
-                    if valid_first_reflection_nb(
-                        tx1[0], tx1[1],
-                        rx_x, rx_y,
-                        walls_nb[w1,0], walls_nb[w1,1],
-                        walls_nb[w1,2], walls_nb[w1,3]
-                    ):
+                    if first_reflection_visible_nb(tx_x,tx_y,rx_x,rx_y,tx1[0],tx1[1],w1,walls_nb,grid_start,grid_count,grid_list):
                         insert_topk(best,d)
 
             valid_w2 = RX_mask & WWV[w1]
@@ -1026,16 +960,7 @@ def solver_rx_loop(
                 if d_lb >= best[-1]:
                     continue
 
-                d = second_reflection_dist_nb(
-                    tx_x, tx_y,
-                    rx_x, rx_y,
-                    walls_nb[w1,0], walls_nb[w1,1],
-                    walls_nb[w1,2], walls_nb[w1,3],
-                    walls_nb[w2,0], walls_nb[w2,1],
-                    walls_nb[w2,2], walls_nb[w2,3],
-                    best[-1],
-                    1e-9
-                )
+                d = second_reflection_dist_nb(tx_x, tx_y, rx_x, rx_y, walls_nb[w1, 0], walls_nb[w1, 1], walls_nb[w1, 2], walls_nb[w1, 3], walls_nb[w2, 0], walls_nb[w2, 1], walls_nb[w2, 2], walls_nb[w2, 3], best[-1], 1e-09,w1,w2,walls_nb,grid_start,grid_count,grid_list)
 
                 insert_topk(best,d)
 
@@ -1373,7 +1298,10 @@ def main():
                 walls_nb[i,2], walls_nb[i,3]
             )
         )
-    tx_img = np.array(tx_img, dtype=np.float32)
+    # Keep geometric predicates in double precision. Rounding a mirrored TX
+    # before intersecting an oblique wall can move a corner hit across a wall
+    # and change path eligibility; the exported cost field can remain FP32.
+    tx_img = np.array(tx_img, dtype=np.float64)
 
     solver_rx_loop(
         rx_list,
@@ -1397,7 +1325,8 @@ def main():
 
     out_path = f"{OUT_DIR}/{IDX}_{TX_ID}.npz"
 
-    np.savez_compressed(out_path, dist_map=dist_map.astype(np.float16))
+    # Preserve solver precision: FP16 quantization can create false gradient boundaries.
+    np.savez_compressed(out_path, dist_map=dist_map.astype(np.float32, copy=False))
 
     print(f"[Done] {IDX}_{TX_ID} | time={time.perf_counter()-MAIN_START_TIME:.2f}s")
 

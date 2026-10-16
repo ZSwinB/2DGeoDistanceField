@@ -300,6 +300,18 @@ def build_wwv(geo, wall_segment, config):
     # ===== WWVmove（内部计算，不落盘）=====
     WWVmove = build_WWVmove(geo, walls)
 
+    backend = getattr(config, "WWV_BACKEND", "python")
+    if backend not in ("python", "numba"):
+        raise ValueError(f"Unknown WWV_BACKEND: {backend}")
+    if backend == "numba":
+        from pipeline.stage3_middata.wwv_numeric import compute_wwv
+        workers = (config.INNER_WORKERS or 1) if config.USE_INNER_MP else 1
+        WWV = compute_wwv(walls, WWVmove, visible_walls_for_point,
+                          workers=workers, eps=EPS, endpoint_eps=ENDPOINT_EPS)
+        save_npy(out_path, WWV)
+        print(f"[Done] WWV numeric | workers={workers} | saved to {out_path}")
+        return None
+
     # ===== WWV =====
     WWV = np.zeros((N_walls, N_walls), dtype=bool)
 

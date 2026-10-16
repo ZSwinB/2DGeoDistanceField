@@ -25,11 +25,15 @@ class Config:
 
     # ===== stage2 =====
     WALL_DIR = "wall"  # str: directory name for storing generated wall segments
+    # 0 retains pixel boundary facets; 0.75 reconstructs rasterized facades.
+    # Changing this requires regenerating walls, visibility and converted data.
+    WALL_APPROX_EPS = 0.0  # Maximum contour approximation distance in pixels.
 
     # ===== stage3 =====
     MIDDATA_DIR = "middata"      # str: root directory for all intermediate data
     PVW_DIR = "middata/pvw"      # str: Point Visible Walls storage path
     WWV_DIR = "middata/wwv"      # str: Wall-Wall visibility storage path
+    WWV_BACKEND = "numba"  # Compiled sweep; "python" retains the reference implementation.
     PVP_DIR = "middata/pvp"      # str: Point Visible Points storage path
     # recommend not to change these
     # ===== stage4 =====

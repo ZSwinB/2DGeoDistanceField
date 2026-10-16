@@ -1,4 +1,24 @@
 # 2DGeoDistanceField
+
+## Accelerated GPU entry (Aicoding branch)
+
+本分支包含已验证的 **FP64 几何 / FP32 输出、K=1 CPU/GPU 流水仿真**，支持 256×256 和 2560×2560。数值核心来自已完成的 701 城生产版本；输入路径、场景/TX 数量、分区、输出位置和分辨率现在通过 CLI 配置。
+
+- [运行和环境](docs/GPU_RUNNER.md)：入口 `python -m accelerated`，独立于下面历史版 `run_all.py`。
+- [需要准备的外部输入与格式](docs/INPUTS.md)：官方多边形 JSON、发射点 JSON、scene/TX 索引；无需 gain 或预计算缓存。
+- [加速技术与实测口径](docs/ACCELERATION.md)
+- [配置（机器可读）](docs/production_config.json)、[回归验证](docs/VALIDATION.md)
+- [原始 agent 技术交接报告（历史记录）](docs/HISTORICAL_HANDOFF.md)
+
+```bash
+python -m pip install -r requirements-gpu.txt
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 NUMBA_NUM_THREADS=1
+python -m accelerated --input-root /external/input --index /external/selection.csv \
+  --output /external/new-run --scale 10 --workers 12
+```
+
+仓库只提供代码和文档，**不包含真实输入、距离场、预览图、训练权重或重数据**。请先阅读输入说明。以下为原有平台与历史 CPU/栅格流程文档；GPU 入口采用官方向量几何，旧 `Config` 不控制新入口。
+
 ## 2D几何->距离场快速仿真平台
 
 本项目面向无线通信中**传播数据生成**与**快速仿真**的需求，主要针对以下类型的数据：
@@ -1507,6 +1527,12 @@ outputs/convert/{idx}/
 
 ### 5.3 Final Simulation Output (.npz)
 
+`dist_map` is saved as **float32**, preserving the solver's output precision.
+Do not convert it to float16 before gradient or switching-line analysis: quantization
+can create false boundaries. NPZ compression is lossless. Older float16 output files
+must be regenerated to recover the original precision; casting them to float32 does
+not restore lost information.
+
 ```
 outputs/sim/{idx}_{tx_id}.npz
 ```
@@ -1751,12 +1777,51 @@ By removing such structures:
 
 ---
 
-### Future Work
+### Future Work (historical note, before the October 2026 patch)
 
 Planned improvement (next version):
 
 * Explicitly compute reflection points
 * Validate visibility at the reflection point (TX → P and RX → P)
+
+### October 2026: numerical and geometry audit
+
+The local patch now checks the actual reflection points and all propagation
+legs for one- and two-bounce reflections. It also checks the missing reflected
+leg in the reflection/diffraction combinations. PVW and WWV remain approximate
+candidate filters; this does not prove that all physically valid paths are
+enumerated.
+
+Visibility now distinguishes a tangent corner touch from a ray crossing into
+a building through a vertex. Query endpoints at reflection/diffraction corners
+remain allowed. Wall extraction compresses surviving original contour edges
+without misaligning direction indices when repeated points are encountered.
+
+Mirrored transmitter coordinates are retained in FP64 for geometric predicates.
+The field buffer and NPZ `dist_map` are FP32. Saving this field as FP16 introduces
+new central-difference artifacts; converting a saved FP16 field back to FP32
+does not recover the lost precision. Regenerate old FP16 distance caches.
+
+`Config.WALL_APPROX_EPS` controls an optional change in the geometry model:
+
+* `0.0` (default): keep individual pixel-boundary facets.
+* `0.75`: approximate the retained ordered contours with `cv2.approxPolyDP`,
+  using a tolerance of 0.75 grid pixels. This reconstructs rasterized oblique
+  facades instead of reflecting from hundreds of staircase facets. It changes
+  walls and corner positions and may affect small geometric features.
+
+After changing this setting, regenerate Stage 2 walls, Stage 3 PVW/WWV/PVP,
+Stage 4 converted arrays and Stage 5 fields together. Do not mix old visibility
+tables with new walls. The default external-contour method remains in use;
+the alternative `degreewall.py` and courtyard-hole behavior are unchanged.
+
+Five real city scenes were recomputed on server 4 using tolerance `0.75`,
+`K=1`, `DIFF_BIAS=300`, `FALLBACK_BIAS=600` and FP32 export. Field values were
+not smoothed. Switching candidates use unfiltered central differences and
+`abs(norm(gradient)-1) > 0.05`, excluding wall-touching difference stencils,
+the image border and the immediate transmitter neighborhood. These are
+candidates, not verified ground-truth switching labels. Detailed evidence and
+historical findings are summarized in [the agent handoff](docs/HISTORICAL_HANDOFF.md).
 
 ---
 

@@ -3,6 +3,7 @@ import os
 from tqdm import tqdm
 import multiprocessing as mp
 from numba import njit
+from utils.visibility import visible_between_points_nb
 from utils.io import save_npy, load_npy
 
 
@@ -48,66 +49,8 @@ def segment_intersect_strict_nb(ax, ay, bx, by, cx, cy, dx, dy):
 
 
 @njit
-def visible_fast_nb(
-    x0, y0,
-    x1, y1,
-    walls,
-    grid_start,
-    grid_count,
-    grid_list,
-    skip_w
-):
-    """
-    Fast visibility check between two points using grid acceleration.
-
-    Behavior:
-        - Traverses grid cells intersecting the segment
-        - Tests intersection with candidate walls
-        - Optionally skips one wall index (for endpoint cases)
-
-    Args:
-        x0, y0: source point
-        x1, y1: target point
-        walls (np.ndarray): wall segments (N,4)
-        grid_start, grid_count, grid_list: CSR-style grid structure
-        skip_w (int): wall index to skip (-1 means no skip)
-
-    Returns:
-        bool: True if visible (no intersection), False otherwise
-    """
-
-    gx0 = int(min(x0, x1) // GRID_SIZE)
-    gx1 = int(max(x0, x1) // GRID_SIZE)
-    gy0 = int(min(y0, y1) // GRID_SIZE)
-    gy1 = int(max(y0, y1) // GRID_SIZE)
-
-    for gx in range(gx0, gx1 + 1):
-        for gy in range(gy0, gy1 + 1):
-
-            start = grid_start[gx, gy]
-            count = grid_count[gx, gy]
-
-            for k in range(start, start + count):
-
-                idx = grid_list[k]
-
-                if skip_w != -1 and idx == skip_w:
-                    continue
-
-                xA = walls[idx, 0]
-                yA = walls[idx, 1]
-                xB = walls[idx, 2]
-                yB = walls[idx, 3]
-
-                if segment_intersect_strict_nb(
-                    x0, y0,
-                    x1, y1,
-                    xA, yA,
-                    xB, yB
-                ):
-                    return False
-
-    return True
+def visible_fast_nb(x0,y0,x1,y1,walls,grid_start,grid_count,grid_list,skip_w):
+    return visible_between_points_nb(x0,y0,x1,y1,walls,grid_start,grid_count,grid_list,skip_w,GRID_SIZE)
 
 
 # =======================

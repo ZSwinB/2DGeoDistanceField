@@ -54,6 +54,57 @@ def prune_spurs(contour):
     return S
 
 
+def split_pruned_contour(points, retained):
+    """Compress surviving original 8-neighbor edges without inventing gap edges."""
+    segments = []
+    active_start = None
+    active_end = None
+    active_direction = None
+    for i in range(len(points)):
+        p = tuple(points[i])
+        q = tuple(points[(i + 1) % len(points)])
+        if p == q:
+            continue
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        valid = p in retained and q in retained and abs(dx) <= 1 and abs(dy) <= 1
+        direction = (dx, dy)
+        if not valid:
+            if active_start is not None:
+                segments.append((active_start, active_end))
+            active_start = active_end = active_direction = None
+            continue
+        if active_start is not None and active_end == p and active_direction == direction:
+            active_end = q
+        else:
+            if active_start is not None:
+                segments.append((active_start, active_end))
+            active_start, active_end, active_direction = p, q, direction
+    if active_start is not None:
+        segments.append((active_start, active_end))
+
+    # Removed excursions may return to the same retained point; merge only
+    # touching, forward-collinear segments, including the contour seam.
+    merged = []
+    for p, q in segments:
+        if merged:
+            a, b = merged[-1]
+            v = (b[0]-a[0], b[1]-a[1])
+            w = (q[0]-p[0], q[1]-p[1])
+            if b == p and v[0]*w[1] == v[1]*w[0] and v[0]*w[0]+v[1]*w[1] > 0:
+                merged[-1] = (a, q)
+                continue
+        merged.append((p, q))
+    if len(merged) > 1:
+        a, b = merged[-1]
+        p, q = merged[0]
+        v = (b[0]-a[0], b[1]-a[1])
+        w = (q[0]-p[0], q[1]-p[1])
+        if b == p and v[0]*w[1] == v[1]*w[0] and v[0]*w[0]+v[1]*w[1] > 0:
+            merged[0] = (a, q)
+            merged.pop()
+    return merged
+
+
 def run(geo, config):
     """
     Generate wall segments from geometry and save results.
@@ -95,15 +146,6 @@ def run(geo, config):
 
     all_segments = []
 
-    def direction(p1, p2):
-        dx = p2[0] - p1[0]
-        dy = p2[1] - p1[1]
-        dirs = {
-            (1,0):0,(1,-1):1,(0,-1):2,(-1,-1):3,
-            (-1,0):4,(-1,1):5,(0,1):6,(1,1):7
-        }
-        return dirs.get((dx,dy), None)
-
     # ========= 分段 =========
     for cnt in contours:
 
@@ -122,48 +164,20 @@ def run(geo, config):
             continue
 
         # ⚠ 转回有序序列（保持原 contour 顺序）
-        pts = np.array(
-            [p for p in pts_list if p in pts_pruned],
-            dtype=np.int32
-        )
-
-        if len(pts) < 2:
-            continue
-
-        # ✅ 关键修复2：防止 squeeze 变成 (2,)
-        if pts.ndim != 2 or pts.shape[1] != 2:
-            continue
-
-        if len(pts) < 2:
-            continue
-
-        dirs = []
-        for i in range(len(pts)):
-            p1 = pts[i]
-            p2 = pts[(i+1) % len(pts)]
-            d = direction(p1, p2)
-
-            # 可选：防御非法方向
-            if d is None:
-                continue
-
-            dirs.append(d)
-
-        if len(dirs) == 0:
-            continue
-
-        start_idx = 0
-
-        for i in range(1, len(dirs)):
-            if dirs[i] != dirs[i-1]:
-                all_segments.append(
-                    (tuple(pts[start_idx]), tuple(pts[i]))
-                )
-                start_idx = i
-
-        all_segments.append(
-            (tuple(pts[start_idx]), tuple(pts[0]))
-        )
+        approximation = float(getattr(config, "WALL_APPROX_EPS", 0.0))
+        if approximation > 0:
+            surviving = np.array([p for p in pts_list if p in pts_pruned], dtype=np.int32)
+            polygon = cv2.approxPolyDP(surviving.reshape(-1, 1, 2), approximation, True).reshape(-1, 2)
+            if len(polygon) >= 3:
+                for i in range(len(polygon)):
+                    p = tuple(polygon[i])
+                    q = tuple(polygon[(i + 1) % len(polygon)])
+                    if p != q:
+                        all_segments.append((p, q))
+            else:
+                all_segments.extend(split_pruned_contour(pts_list, pts_pruned))
+        else:
+            all_segments.extend(split_pruned_contour(pts_list, pts_pruned))
 
     # ========= 保存 =========
     save_npy(save_path, np.array(all_segments, dtype=object))
